@@ -4,8 +4,10 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py import point_cloud2
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 import numpy as np
 from math import atan2, pi
+import sys
 
 class LidarFOVFilter(Node):
     def __init__(self):
@@ -16,12 +18,14 @@ class LidarFOVFilter(Node):
         self.declare_parameter('view_width', 2 * pi)
         self.declare_parameter('input_topic', '/ouster/points')
         self.declare_parameter('output_topic', '/ouster/points_filtered')
+        self.declare_parameter('use_sensor_data_qos', True)
         
         # Get parameters
         self.view_direction = self.get_parameter('view_direction').value
         self.view_width = self.get_parameter('view_width').value
         input_topic = self.get_parameter('input_topic').value
         output_topic = self.get_parameter('output_topic').value
+        use_sensor_data_qos = self.get_parameter('use_sensor_data_qos').value
         
         # Validate parameters
         if not (-pi <= self.view_direction <= pi):
@@ -40,21 +44,38 @@ class LidarFOVFilter(Node):
             f"range=[{self.min_angle:.3f}, {self.max_angle:.3f}] rad"
         )
         
+        # Create QoS profile for sensor data
+        if use_sensor_data_qos:
+            self.sensor_data_qos = QoSProfile(
+                depth=10,
+                reliability=QoSReliabilityPolicy.BEST_EFFORT,
+                durability=QoSDurabilityPolicy.VOLATILE,
+                history=QoSHistoryPolicy.KEEP_LAST
+            )
+        else:
+            self.sensor_data_qos = QoSProfile(
+                depth=10,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.VOLATILE,
+                history=QoSHistoryPolicy.KEEP_LAST
+            )
+        
         # Create subscription and publisher
         self.subscription = self.create_subscription(
             PointCloud2,
             input_topic,
             self.pointcloud_callback,
-            10
+            self.sensor_data_qos
         )
         
         self.publisher = self.create_publisher(
             PointCloud2,
             output_topic,
-            10
+            10  # Using default QoS for publisher
         )
         
         self.get_logger().info(f"Subscribing to {input_topic}, publishing to {output_topic}")
+        self.get_logger().info(f"Using QoS profile: {use_sensor_data_qos}")
     
     def pointcloud_callback(self, msg):
         # Convert PointCloud2 to list of points
